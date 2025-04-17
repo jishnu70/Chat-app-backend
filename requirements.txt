@@ -1,0 +1,7 @@
+fastapi
+uvicorn
+tortoise-orm
+asyncpg
+python-dotenv
+firebase-admin
+python-multipart
