@@ -25,7 +25,7 @@ async def get_or_create_user(firebase_uid: str, email: str, display_name: str | 
         )
         return user.userID
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Error while creating the user:{e}")
+        raise HTTPException(status_code=400, detail=f"Error while creating the user:{str(e)}")
     
 async def close_db():
     await Tortoise.close_connections()
