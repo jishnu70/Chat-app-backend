@@ -1,5 +1,10 @@
 from tortoise import Model, fields
 from tortoise.contrib.pydantic import pydantic_model_creator
+from enum import Enum
+
+class MediaType(str, Enum):
+    IMAGE = "image"
+    VIDEO = "video"
 
 class User(Model):
     userID = fields.IntField(primary_key=True)
