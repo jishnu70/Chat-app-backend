@@ -143,3 +143,55 @@ async def individual_chat(websocket: WebSocket, receiver_id: int):
         print(f"Error: {e}")
     finally:
         await websocket.close()
+
+@app.websocket("/chat/group/{group_id}")
+async def group_chat(websocket: WebSocket, group_id: int):
+    token = websocket.headers.get("authorization")
+    if not token or not token.startswith("Bearer "):
+        await websocket.close(code=1008, reason="Authorization header missing or malformed")
+        return
+    token = token.removeprefix("Bearer ").strip()
+    decoded_token = await verify_firebase_token_websocket(token)
+    sender_id = await get_or_create_user(
+        decoded_token["uid"], decoded_token.get("email", ""), decoded_token.get("name", None)
+    )
+    sender = User.filter(userID = sender_id).first()
+    group = Group.filter(group_id = group_id).first()
+    membership = await GroupMember.filter(group_id = group_id, userID = sender_id).first()
+    if not sender or not group or not membership:
+        await websocket.close(code=1008, reason="Group not found or user not a member")
+        return
+    if group_id not in group_connections:
+        group_connections[group_id] = {}
+    group_connections[group_id][sender_id] = websocket
+
+    await websocket.accept()
+    try:
+        while True:
+            data = await websocket.receive_text()
+            if not data.strip():
+                await websocket.send_text("Message cannot be empty")
+                continue
+            message = MessageCreatePydantic(message_content=data)
+            await Message.create(
+                sender = sender,
+                group = group,
+                message_content=message.message_content
+            )
+            for member_id, member_ws in group_connections.get(group_id, {}).items():
+                try:
+                    await member_ws.send_text(
+                        f"{sender_id} in group {group_id}: {message.message_content}"
+                    )
+                except Exception as e:
+                    print(f"Failed to send to {member_id}: {e}")
+    except WebSocketDisconnect:
+        print(f"User {sender_id} disconnected from group {group_id}")
+    except Exception as e:
+        print(f"Error: {e}")
+        await websocket.send_text(f"Error: {str(e)}")
+    finally:
+        group_connections[group_id].pop(sender_id, None)
+        if not group_connections[group_id]:
+            del group_connections[group_id]
+        await websocket.close()
