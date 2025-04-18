@@ -106,3 +106,40 @@ async def upload_media(
         return {"media_url": media_url, "media_type": media_type}
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Media upload failed: {str(e)}")
+    
+@app.websocket("/chat/{recevier_id}")
+async def individual_chat(websocket: WebSocket, receiver_id: int):
+    token = websocket.headers.get("authorization")
+    if not token or not token.startswith("Bearer "):
+        await websocket.close(code=1000, reason="Authorization header missing or malformed")
+        return
+    token = token.removeprefix("Bearer ").strip()
+    decoded_token = await verify_firebase_token_websocket(token)
+    sender_id = await get_or_create_user(
+        decoded_token["uid"], decoded_token.get("email", ""), decoded_token.get("name", None)
+    )
+    sender = await User.filter(user_id=sender_id).first()
+    receiver = await User.filter(user_id=receiver_id).first()
+    if not sender or not receiver:
+        await websocket.close(code=1008, reason="Sender or receiver not found")
+        return
+    websocket.accept()
+    try:
+        while True:
+            data = await websocket.receive_text()
+            if not data.strip():
+                await websocket.send_text("Message cannot be empty")
+                continue
+            message = MessageCreatePydantic(message_content=data)
+            await Message.create(
+                sender=sender,
+                receiver=receiver,
+                message_content=message.message_content
+            )
+            await websocket.send_text(f"You to {receiver_id}: {message.message_content}")
+    except WebSocketDisconnect:
+        print(f"User {sender_id} disconnected")
+    except Exception as e:
+        print(f"Error: {e}")
+    finally:
+        await websocket.close()
