@@ -1,12 +1,17 @@
 from fastapi import WebSocketException, HTTPException
 import firebase_admin
 from firebase_admin import auth, credentials
+import os
 import asyncio
+import json
+from dotenv import load_dotenv
+
+load_dotenv()
 
 try:
-    if not firebase_admin._apps:
-        cred = credentials.Certificate("firebase-service-account.json")
-        firebase_admin.initialize_app(cred)
+    firebase_credentials = json.loads(os.getenv("FIREBASE_CREDENTIALS"))
+    cred = credentials.Certificate(firebase_credentials)
+    firebase_admin.initialize_app(cred)
 except Exception as e:
     raise Exception(f"Firebase initialization failed: {str(e)}")
 
