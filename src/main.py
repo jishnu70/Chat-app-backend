@@ -1,5 +1,6 @@
 from fastapi import FastAPI, WebSocketDisconnect, WebSocket, HTTPException, Depends, UploadFile, File
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.middleware.cors import CORSMiddleware
 from src.database import init_db, get_or_create_user, close_db
 from src.models import User, Group, GroupMember, Message, UserCreatePydantic, GroupCreatePydantic, GroupMemberPydantic, MessageCreatePydantic, MediaType
 from src.auth import verify_firebase_token_websocket, verify_firebase_token
@@ -14,13 +15,23 @@ load_dotenv()
 app = FastAPI()
 security = HTTPBearer()
 
-# websocket connections for group chats
+# ✅ Allow CORS from any origin
+origins = ["*"]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# WebSocket group storage
 group_connections = {}
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
-
     # ✅ FIX: Correct UPLOAD_DIR usage
     os.makedirs(os.getenv("UPLOAD_DIR", "./uploads"), exist_ok=True)
     # anything above is equivalent to on_event("startup")
