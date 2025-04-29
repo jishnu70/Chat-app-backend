@@ -20,7 +20,9 @@ group_connections = {}
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
-    os.makedirs(os.getenv(""), exist_ok=True)
+
+    # ✅ FIX: Correct UPLOAD_DIR usage
+    os.makedirs(os.getenv("UPLOAD_DIR", "./uploads"), exist_ok=True)
     # anything above is equivalent to on_event("startup")
     yield
     # anything below is equivalent to on_event("shutdown")
@@ -32,9 +34,9 @@ app.lifespan = lifespan
 async def create_users(user: UserCreatePydantic):
     try:
         exisiting_user = await User.filter(
-            firebase_Uid = user.firebase_Uid
+            firebase_Uid=user.firebase_Uid
         ).first() or await User.filter(
-            email = user.email
+            email=user.email
         ).first()
         if exisiting_user:
             raise HTTPException(status_code=400, detail="User already exists")
@@ -42,8 +44,9 @@ async def create_users(user: UserCreatePydantic):
         return {"message": "User Created"}
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"User creation failed: {str(e)}")
-    
-@app.post("groups")
+
+# ✅ FIX: missing forward slash in route
+@app.post("/groups")
 async def create_groups(
     group: GroupCreatePydantic,
     credentials: HTTPAuthorizationCredentials = Depends(security)
@@ -53,13 +56,13 @@ async def create_groups(
         decoded_token["uid"], decoded_token.get("email", ""), decoded_token.get("name", None)
     )
     try:
-        creator = await User.get(userID = creator_id)
-        new_group = await Group.create(group_name = group.group_name, group_creator = creator)
+        creator = await User.get(userID=creator_id)
+        new_group = await Group.create(group_name=group.group_name, group_creator=creator)
         await GroupMember.create(group_user=creator, group=new_group)
         return {"group_id": new_group.group_id, "message": "Group created"}
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Group creation failed: {str(e)}")
-    
+
 @app.post("/groups/{group_id}/member")
 async def add_group_members(
     group_id: int,
@@ -71,21 +74,21 @@ async def add_group_members(
         decoded_token["uid"], decoded_token.get("email", ""), decoded_token.get("name", None)
     )
     try:
-        group = await Group.get(group_id = group_id)
-        requester = await User.get(userID = requester_id)
+        group = await Group.get(group_id=group_id)
+        requester = await User.get(userID=requester_id)
         if group.group_creator != requester:
             raise HTTPException(status_code=403, detail="Only group creator can add members")
-        new_member = await User.get(userID = member.userID)
-        existing_member = await GroupMember.filter(group=group, group_user = member).first()
+        new_member = await User.get(userID=member.userID)
+        existing_member = await GroupMember.filter(group=group, group_user=new_member).first()
         if existing_member:
             raise HTTPException(status_code=400, detail="User already in group")
-        await GroupMember.create(group=group, group_user = member)
-        return {"message": f"User {new_member.user_id} added to group {group_id}"}
+        await GroupMember.create(group=group, group_user=new_member)
+        return {"message": f"User {new_member.userID} added to group {group_id}"}
     except User.DoesNotExist:
         raise HTTPException(status_code=404, detail="User or group not found")
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to add member: {str(e)}")
-    
+
 @app.post("/media")
 async def upload_media(
     file: UploadFile = File(...),
@@ -96,18 +99,19 @@ async def upload_media(
         decoded_token["uid"], decoded_token.get("email", ""), decoded_token.get("name", None)
     )
     try:
-        file_extension = file.filename.rsplit(".",1)[-1].lower()
+        file_extension = file.filename.rsplit(".", 1)[-1].lower()
         media_type = MediaType.IMAGE if file_extension in ["jpg", "jpeg", "png"] else MediaType.VIDEO
         file_name = f"{uuid.uuid4()}.{file_extension}"
-        file_path = Path(os.getenv("UPLOAD_DIR")) / file_name
+        file_path = Path(os.getenv("UPLOAD_DIR", "./uploads")) / file_name
         async with aiofiles.open(file_path, "wb") as f:
             await f.write(await file.read())
         media_url = f"/uploads/{file_name}"
         return {"media_url": media_url, "media_type": media_type}
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Media upload failed: {str(e)}")
-    
-@app.websocket("/chat/{recevier_id}")
+
+# ✅ FIX: Typo in route param + missing await on accept
+@app.websocket("/chat/{receiver_id}")
 async def individual_chat(websocket: WebSocket, receiver_id: int):
     token = websocket.headers.get("authorization")
     if not token or not token.startswith("Bearer "):
@@ -118,12 +122,12 @@ async def individual_chat(websocket: WebSocket, receiver_id: int):
     sender_id = await get_or_create_user(
         decoded_token["uid"], decoded_token.get("email", ""), decoded_token.get("name", None)
     )
-    sender = await User.filter(user_id=sender_id).first()
-    receiver = await User.filter(user_id=receiver_id).first()
+    sender = await User.filter(userID=sender_id).first()
+    receiver = await User.filter(userID=receiver_id).first()
     if not sender or not receiver:
         await websocket.close(code=1008, reason="Sender or receiver not found")
         return
-    websocket.accept()
+    await websocket.accept()
     try:
         while True:
             data = await websocket.receive_text()
@@ -155,9 +159,9 @@ async def group_chat(websocket: WebSocket, group_id: int):
     sender_id = await get_or_create_user(
         decoded_token["uid"], decoded_token.get("email", ""), decoded_token.get("name", None)
     )
-    sender = User.filter(userID = sender_id).first()
-    group = Group.filter(group_id = group_id).first()
-    membership = await GroupMember.filter(group_id = group_id, userID = sender_id).first()
+    sender = await User.filter(userID=sender_id).first()
+    group = await Group.filter(group_id=group_id).first()
+    membership = await GroupMember.filter(group=group, group_user=sender).first()
     if not sender or not group or not membership:
         await websocket.close(code=1008, reason="Group not found or user not a member")
         return
@@ -174,8 +178,8 @@ async def group_chat(websocket: WebSocket, group_id: int):
                 continue
             message = MessageCreatePydantic(message_content=data)
             await Message.create(
-                sender = sender,
-                group = group,
+                sender=sender,
+                group=group,
                 message_content=message.message_content
             )
             for member_id, member_ws in group_connections.get(group_id, {}).items():
