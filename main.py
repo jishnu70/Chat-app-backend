@@ -5,6 +5,8 @@ from src.database import init_db, get_or_create_user, close_db
 from src.models import User, Group, GroupMember, Message, UserCreatePydantic, GroupCreatePydantic, GroupMemberPydantic, MessageCreatePydantic, MediaType
 from src.auth import verify_firebase_token_websocket, verify_firebase_token
 import os
+import json
+import time
 import aiofiles
 from contextlib import asynccontextmanager
 import uuid
@@ -141,17 +143,26 @@ async def individual_chat(websocket: WebSocket, receiver_id: int):
     await websocket.accept()
     try:
         while True:
-            data = await websocket.receive_text()
-            if not data.strip():
-                await websocket.send_text("Message cannot be empty")
+            raw = await websocket.receive_text()
+            payload = json.loads(raw)
+            content = payload.get("content")
+
+            if not content:
+                await websocket.send_text("Invalid payload")
                 continue
-            message = MessageCreatePydantic(message_content=data)
+            
             await Message.create(
                 sender=sender,
-                receiver=receiver,
-                message_content=message.message_content
+                receiver = receiver,
+                message_content=content
             )
-            await websocket.send_text(f"You to {receiver_id}: {message.message_content}")
+
+            msg = {
+                "sender_id": sender.userID,       # int
+                "content":    content,           # encrypted string
+                "timestamp":  int(time.time()*1000)  # ms since epoch
+            }
+            await websocket.send_text(json.dumps(msg))
     except WebSocketDisconnect:
         print(f"User {sender_id} disconnected")
     except Exception as e:
@@ -183,21 +194,29 @@ async def group_chat(websocket: WebSocket, group_id: int):
     await websocket.accept()
     try:
         while True:
-            data = await websocket.receive_text()
-            if not data.strip():
-                await websocket.send_text("Message cannot be empty")
+            raw = await websocket.receive_text()
+            data = json.loads(raw)
+            content = data.get("content")
+            if not content:
+                await websocket.send_text("Invalid payload")
                 continue
-            message = MessageCreatePydantic(message_content=data)
+
             await Message.create(
                 sender=sender,
                 group=group,
-                message_content=message.message_content
+                message_content=content
             )
+
+            msg = {
+                "sender_id": sender.userID,
+                "group_id":   group_id,
+                "content":    content,
+                "timestamp":  int(time.time()*1000)
+            }
+
             for member_id, member_ws in group_connections.get(group_id, {}).items():
                 try:
-                    await member_ws.send_text(
-                        f"{sender_id} in group {group_id}: {message.message_content}"
-                    )
+                    await member_ws.send_text(json.dumps(msg))
                 except Exception as e:
                     print(f"Failed to send to {member_id}: {e}")
     except WebSocketDisconnect:
