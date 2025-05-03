@@ -58,6 +58,23 @@ async def create_users(user: UserCreatePydantic):
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"User creation failed: {str(e)}")
 
+@app.get("/users", dependencies=[Depends(security)])
+async def list_users(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    decoded_token = await verify_firebase_token(credentials.credentials)
+    user_id = await get_or_create_user(
+        decoded_token["uid"], decoded_token.get("email", ""), decoded_token.get("name", None)
+    )
+    try:
+        user = await User.get(userID = user_id)
+        if not user:
+            raise HTTPException(status_code=402, detail="User does not exist")
+        # Fetch all users
+        users = await User.all().values("userID", "username")  # or display_name/email
+        # Return a list of dicts: [{"userID":1,"username":"Alice"}, ...]
+        return [{"userID": u["userID"], "username": u.get("username") or ""} for u in users]
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"failed: {str(e)}")
+
 # ✅ FIX: missing forward slash in route
 @app.post("/groups")
 async def create_groups(
