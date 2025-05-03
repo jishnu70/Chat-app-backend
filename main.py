@@ -2,6 +2,7 @@ from fastapi import FastAPI, WebSocketDisconnect, WebSocket, HTTPException, Depe
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
 from src.database import init_db, get_or_create_user, close_db
+from src.schemas import ChatSummary
 from src.models import User, Group, GroupMember, Message, UserCreatePydantic, GroupCreatePydantic, GroupMemberPydantic, MessageCreatePydantic, MediaType
 from src.auth import verify_firebase_token_websocket, verify_firebase_token
 import os
@@ -246,3 +247,37 @@ async def group_chat(websocket: WebSocket, group_id: int):
         if not group_connections[group_id]:
             del group_connections[group_id]
         await websocket.close()
+
+@app.get("/chats", dependencies=[Depends(security)], response_model=list[ChatSummary])
+async def list_chats(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    decoded = await verify_firebase_token(credentials.credentials)
+    me = await User.get(firebase_Uid=decoded['uid'])
+
+    priv_msgs = await Message.filter(
+        (Message.sender == me) | (Message.receiver == me)
+    ).order_by("-timestamp").all()
+    seen = set()
+    private_chats = []
+    for msg in priv_msgs:
+        other = msg.receiver if msg.sender == me else msg.sender
+        if other.userID not in seen:
+            seen.add(other.userID)
+            private_chats.append(ChatSummary(
+                chat_id=other.userID,
+                title=other.display_name or str(other.userID),
+                last_message=msg.message_content,
+                is_group=False
+            ))
+    members = await GroupMember.filter(group_user=me).all()
+    group_chats = []
+    for membership in members:
+        grp = membership.group
+        last = await Message.filter(group=grp).order_by('-timestamp').first()
+        group_chats.append(ChatSummary(
+            chat_id=grp.group_id,
+            title=grp.group_name,
+            last_message=last.message_content if last else '',
+            is_group=True
+        ))
+
+    return private_chats + group_chats
