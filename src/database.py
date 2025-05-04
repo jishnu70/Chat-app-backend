@@ -7,8 +7,13 @@ from src.models import User
 
 load_dotenv()
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
-logger = logging.getLogger(__name__)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(message)s",
+    handlers=[logging.StreamHandler()]
+)
+os.environ["PYTHONUNBUFFERED"] = "1"
+logger = logging.getLogger()
 
 async def init_db():
     try:
@@ -22,12 +27,29 @@ async def init_db():
         if "?sslmode=" in db_url:
             db_url = db_url.split("?sslmode=")[0]
         logger.info(f"Database URL (sanitized): {db_url.replace(os.getenv('DATABASE_PASSWORD', ''), '****')}")
-        # Configure SSL for asyncpg
-        await Tortoise.init(
-            db_url=db_url,
-            modules={"models": ["src.models"]},
-            _asyncpg={"ssl": True}
-        )
+        # Configure Tortoise with a config dictionary
+        config = {
+            "connections": {
+                "default": {
+                    "engine": "tortoise.backends.asyncpg",
+                    "credentials": {
+                        "database": db_url.split("/")[-1],
+                        "host": db_url.split("@")[1].split(":")[0],
+                        "port": db_url.split(":")[-1].split("/")[0],
+                        "user": db_url.split("//")[1].split(":")[0],
+                        "password": db_url.split(":")[2].split("@")[0],
+                        "ssl": True
+                    }
+                }
+            },
+            "apps": {
+                "models": {
+                    "models": ["src.models"],
+                    "default_connection": "default"
+                }
+            }
+        }
+        await Tortoise.init(config=config)
         logger.info("Database connected, generating schemas")
         await Tortoise.generate_schemas()
         logger.info("Database initialization complete")
