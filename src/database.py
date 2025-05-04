@@ -15,6 +15,11 @@ async def init_db():
         logger.info("Attempting to connect to database")
         db_url = os.getenv("DATABASE_URL") or f"postgresql://{os.getenv('DATABASE_USER')}:{os.getenv('DATABASE_PASSWORD')}@" \
                  f"{os.getenv('DATABASE_HOST')}:{os.getenv('DATABASE_PORT')}/{os.getenv('DATABASE_NAME')}"
+        # Fix for Tortoise ORM: replace 'postgresql' with 'postgres'
+        if db_url.startswith("postgresql://"):
+            db_url = "postgres://" + db_url[len("postgresql://"):]
+        if "?sslmode=" not in db_url:
+            db_url += "?sslmode=require"
         logger.info(f"Database URL (sanitized): {db_url.replace(os.getenv('DATABASE_PASSWORD', ''), '****')}")
         await Tortoise.init(db_url=db_url, modules={"models": ["src.models"]})
         logger.info("Database connected, generating schemas")
