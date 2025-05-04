@@ -27,17 +27,18 @@ async def init_db():
         if "?sslmode=" in db_url:
             db_url = db_url.split("?sslmode=")[0]
         logger.info(f"Database URL (sanitized): {db_url.replace(os.getenv('DATABASE_PASSWORD', ''), '****')}")
-        # Configure Tortoise with a config dictionary
+        # Parse DATABASE_URL
+        parsed_url = urlparse(db_url)
         config = {
             "connections": {
                 "default": {
                     "engine": "tortoise.backends.asyncpg",
                     "credentials": {
-                        "database": db_url.split("/")[-1],
-                        "host": db_url.split("@")[1].split(":")[0],
-                        "port": db_url.split(":")[-1].split("/")[0],
-                        "user": db_url.split("//")[1].split(":")[0],
-                        "password": db_url.split(":")[2].split("@")[0],
+                        "database": parsed_url.path.lstrip("/"),
+                        "host": parsed_url.hostname,
+                        "port": parsed_url.port or 5432,
+                        "user": parsed_url.username,
+                        "password": parsed_url.password,
                         "ssl": True
                     }
                 }
