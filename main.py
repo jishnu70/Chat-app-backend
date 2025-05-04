@@ -24,14 +24,6 @@ security = HTTPBearer()
 # ✅ Allow CORS from any origin
 origins = ["*"]
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
 # WebSocket group storage
 group_connections = {}
 
@@ -54,6 +46,14 @@ async def lifespan(app: FastAPI):
     # anything below is equivalent to on_event("shutdown")
 
 app = FastAPI(lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 @app.post("/users", response_model=UserOut)
 async def create_users(user: UserCreate):
