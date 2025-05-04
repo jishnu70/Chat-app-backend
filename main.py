@@ -15,8 +15,9 @@ from pathlib import Path
 from dotenv import load_dotenv
 import logging
 
-logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
-
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s", force=True)
+os.environ["PYTHONUNBUFFERED"] = "1"  # Ensure logs are not buffered
+logger = logging.getLogger(__name__)
 
 load_dotenv()
 security = HTTPBearer()
@@ -38,12 +39,21 @@ group_connections = {}
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # ✅ FIX: Correct UPLOAD_DIR usage
-    await init_db()
-    os.makedirs(os.getenv("UPLOAD_DIR", "./uploads"), exist_ok=True)
-    # anything above is equivalent to on_event("startup")
-    yield
-    await close_db()
-    # anything below is equivalent to on_event("shutdown")
+    logger.info("Starting application...")
+    try:
+        await init_db()
+        os.makedirs(os.getenv("UPLOAD_DIR", "./uploads"), exist_ok=True)
+        logger.info("Application startup complete")
+        # anything above is equivalent to on_event("startup")
+        yield
+        # anything below is equivalent to on_event("shutdown")
+        await close_db()
+    except Exception as e:
+        logger.error(f"Startup failed: {str(e)}", exc_info=True)
+        raise
+    finally:
+        logger.info("Shutting down application...")
+    
 
 app = FastAPI(lifespan=lifespan)
 
@@ -55,19 +65,35 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy"}
+
 @app.post("/users", response_model=UserOut)
 async def create_users(user: UserCreate):
+    logger.info(f"Creating user: {user.model_dump()}")
     try:
-        exisiting_user = await User.filter(
-            firebase_Uid=user.firebase_Uid
-        ).first() or await User.filter(
-            email=user.email
-        ).first()
-        if exisiting_user:
+        await verify_firebase_token(user.firebase_Uid)
+        existing_user = await User.filter(firebase_Uid=user.firebase_Uid).first()
+        if existing_user:
+            logger.warning(f"User already exists: {user.firebase_Uid}")
             raise HTTPException(status_code=400, detail="User already exists")
-        new_user = await User.create(**user.model_dump())
-        return await UserOut.model_validate(new_user)
+        new_user = await User.create(
+            firebase_Uid=user.firebase_Uid,
+            email=user.email,
+            display_name=user.username,
+            public_key=user.public_key
+        )
+        logger.info(f"User created: ID={new_user.userID}")
+        return UserOut(
+            id=new_user.userID,
+            uid=new_user.firebase_Uid,
+            email=new_user.email,
+            username=new_user.display_name or "",
+            public_key=new_user.public_key
+        )
     except Exception as e:
+        logger.error(f"User creation failed: {str(e)}")
         raise HTTPException(status_code=400, detail=f"User creation failed: {str(e)}")
 
 @app.get("/users/{uid}", dependencies=[Depends(security)], response_model=UserOut)
