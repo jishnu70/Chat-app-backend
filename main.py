@@ -19,7 +19,6 @@ logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %
 
 
 load_dotenv()
-app = FastAPI()
 security = HTTPBearer()
 
 # ✅ Allow CORS from any origin
@@ -36,24 +35,25 @@ app.add_middleware(
 # WebSocket group storage
 group_connections = {}
 
+# @app.on_event("startup")
+# async def startup():
+#     logging.debug("Starting database initialization...")
+#     await init_db()
 
-@app.on_event("startup")
-async def startup():
-    logging.debug("Starting database initialization...")
+# @app.on_event("shutdown")
+# async def shutdown():
+#     await close_db()
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # ✅ FIX: Correct UPLOAD_DIR usage
     await init_db()
-
-@app.on_event("shutdown")
-async def shutdown():
+    os.makedirs(os.getenv("UPLOAD_DIR", "./uploads"), exist_ok=True)
+    # anything above is equivalent to on_event("startup")
+    yield
     await close_db()
-# @asynccontextmanager
-# async def lifespan(app: FastAPI):
-#     # ✅ FIX: Correct UPLOAD_DIR usage
-#     os.makedirs(os.getenv("UPLOAD_DIR", "./uploads"), exist_ok=True)
-#     # anything above is equivalent to on_event("startup")
-#     yield
-#     # anything below is equivalent to on_event("shutdown")
+    # anything below is equivalent to on_event("shutdown")
 
-# app.lifespan = lifespan
+app = FastAPI(lifespan=lifespan)
 
 @app.post("/users", response_model=UserOut)
 async def create_users(user: UserCreate):
