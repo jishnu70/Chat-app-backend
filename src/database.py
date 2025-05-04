@@ -2,6 +2,7 @@ from tortoise import Tortoise
 from dotenv import load_dotenv
 from fastapi import HTTPException
 import os
+from urllib.parse import urlparse
 import logging
 from src.models import User
 
