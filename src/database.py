@@ -59,15 +59,15 @@ async def init_db():
         logger.error(f"Database initialization failed: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Database initialization failed: {str(e)}")
     
-async def get_or_create_user(firebase_uid: str, email: str, display_name: str | None):
+async def get_or_create_user(uid: str, email: str, display_name: str | None):
     try:
         user, created = await User.get_or_create(
-            firebase_Uid = firebase_uid,
-            defaults={"email": email, "display_name": display_name}
+            uid=uid,
+            defaults={"email": email, "username": display_name}
         )
-        return user.userID
+        return user.id
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Error while creating the user:{str(e)}")
-    
+        raise HTTPException(status_code=400, detail=f"Error while creating the user: {str(e)}")
+   
 async def close_db():
     await Tortoise.close_connections()
