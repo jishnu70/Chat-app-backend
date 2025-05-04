@@ -18,10 +18,16 @@ async def init_db():
         # Fix for Tortoise ORM: replace 'postgresql' with 'postgres'
         if db_url.startswith("postgresql://"):
             db_url = "postgres://" + db_url[len("postgresql://"):]
-        if "?sslmode=" not in db_url:
-            db_url += "?sslmode=require"
+        # Remove sslmode from URL if present
+        if "?sslmode=" in db_url:
+            db_url = db_url.split("?sslmode=")[0]
         logger.info(f"Database URL (sanitized): {db_url.replace(os.getenv('DATABASE_PASSWORD', ''), '****')}")
-        await Tortoise.init(db_url=db_url, modules={"models": ["src.models"]})
+        # Configure SSL for asyncpg
+        await Tortoise.init(
+            db_url=db_url,
+            modules={"models": ["src.models"]},
+            _asyncpg={"ssl": True}
+        )
         logger.info("Database connected, generating schemas")
         await Tortoise.generate_schemas()
         logger.info("Database initialization complete")
