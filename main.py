@@ -13,6 +13,10 @@ from contextlib import asynccontextmanager
 import uuid
 from pathlib import Path
 from dotenv import load_dotenv
+import logging
+
+logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
+
 
 load_dotenv()
 app = FastAPI()
