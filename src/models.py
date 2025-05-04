@@ -7,15 +7,15 @@ class MediaType(str, Enum):
     VIDEO = "video"
 
 class User(Model):
-    userID = fields.IntField(primary_key=True)
-    firebase_Uid = fields.CharField(max_length = 128, unique=True)
+    id = fields.IntField(pk=True)
+    uid = fields.CharField(max_length=255, unique=True)  # Firebase UID
     email = fields.CharField(max_length=255, unique=True)
-    display_name = fields.CharField(max_length=100, null=True)
+    username = fields.CharField(max_length=100, unique=True)
     public_key = fields.TextField()
     created_at = fields.DatetimeField(auto_now_add=True)
 
     class Meta:
-        table="users"
+        table = "user"
 
 class Group(Model):
     group_id = fields.IntField(primary_key=True)
