@@ -11,9 +11,10 @@ class User(Model):
     firebase_Uid = fields.CharField(max_length = 128, unique=True)
     email = fields.CharField(max_length=255, unique=True)
     display_name = fields.CharField(max_length=100, null=True)
+    public_key = fields.TextField()
     created_at = fields.DatetimeField(auto_now_add=True)
 
-    class meta:
+    class Meta:
         table="users"
 
 class Group(Model):
@@ -22,14 +23,14 @@ class Group(Model):
     group_creator = fields.ForeignKeyField("models.User", related_name="group_creator")
     created_at = fields.DatetimeField(auto_now_add=True)
 
-    class meta:
+    class Meta:
         table="groups"
 
 class GroupMember(Model):
     group_user = fields.ForeignKeyField("models.User", related_name="group_membership")
     group = fields.ForeignKeyField("models.Group", related_name="members")
 
-    class meta:
+    class Meta:
         table="group_members"
         unique_together = (("group_user", "group"),)
 

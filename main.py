@@ -2,7 +2,7 @@ from fastapi import FastAPI, WebSocketDisconnect, WebSocket, HTTPException, Depe
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
 from src.database import init_db, get_or_create_user, close_db
-from src.schemas import ChatSummary
+from src.schemas import ChatSummary, UserCreate, UserOut
 from src.models import User, Group, GroupMember, Message, UserCreatePydantic, GroupCreatePydantic, GroupMemberPydantic, MessageCreatePydantic, MediaType
 from src.auth import verify_firebase_token_websocket, verify_firebase_token
 import os
@@ -44,8 +44,8 @@ async def lifespan(app: FastAPI):
 
 app.lifespan = lifespan
 
-@app.post("/users")
-async def create_users(user: UserCreatePydantic):
+@app.post("/users", response_model=UserOut)
+async def create_users(user: UserCreate):
     try:
         exisiting_user = await User.filter(
             firebase_Uid=user.firebase_Uid
@@ -54,10 +54,27 @@ async def create_users(user: UserCreatePydantic):
         ).first()
         if exisiting_user:
             raise HTTPException(status_code=400, detail="User already exists")
-        await User.create(**user.dict())
-        return {"message": "User Created"}
+        new_user = await User.create(**user.model_dump())
+        return await UserOut.model_validate(new_user)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"User creation failed: {str(e)}")
+
+@app.get("/users/{uid}", dependencies=[Depends(security)], response_model=UserOut)
+async def get_user_public_key(uid: int, credentials: HTTPAuthorizationCredentials = Depends(security)):
+    decoded_token = await verify_firebase_token(credentials.credentials)
+    user_id = await get_or_create_user(
+        decoded_token["uid"], decoded_token.get("email", ""), decoded_token.get("name", None)
+    )
+    try:
+        self = await User.get(userID = user_id)
+        if not self:
+            raise HTTPException(status_code=402, detail="Self does not exist")
+        user = await User.get(userID = uid)
+        if not user:
+            raise HTTPException(status_code=402, detail="User does not exist")
+        return UserOut.model_validate(user)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
 @app.get("/users", dependencies=[Depends(security)])
 async def list_users(credentials: HTTPAuthorizationCredentials = Depends(security)):
