@@ -80,6 +80,14 @@ async def create_users(user: UserCreate, credentials: HTTPAuthorizationCredentia
             raise HTTPException(status_code=403, detail="UID does not match Firebase token")
         logger.info(f"Firebase token verified for UID: {user.uid}")
         
+        # Validate input data
+        if not user.email:
+            logger.error("Email is required")
+            raise HTTPException(status_code=400, detail="Email is required")
+        if not user.uid:
+            logger.error("UID is required")
+            raise HTTPException(status_code=400, detail="UID is required")
+        
         # Check for existing user
         existing_user = await User.filter(uid=user.uid).first()
         if existing_user:
@@ -87,20 +95,24 @@ async def create_users(user: UserCreate, credentials: HTTPAuthorizationCredentia
             raise HTTPException(status_code=400, detail="User already exists")
         
         # Create new user
-        new_user = await User.create(
-            uid=user.uid,
-            email=user.email,
-            username=user.username,
-            public_key=user.public_key
-        )
-        logger.info(f"User created: ID={new_user.id}, UID={new_user.uid}")
-        return UserOut(
-            id=new_user.id,
-            uid=new_user.uid,
-            email=new_user.email,
-            username=new_user.username or "",
-            public_key=new_user.public_key
-        )
+        try:
+            new_user = await User.create(
+                uid=user.uid,
+                email=user.email,
+                username=user.username,
+                public_key=user.public_key
+            )
+            logger.info(f"User created: ID={new_user.id}, UID={new_user.uid}")
+            return UserOut(
+                id=new_user.id,
+                uid=new_user.uid,
+                email=new_user.email,
+                username=new_user.username or "",
+                public_key=new_user.public_key
+            )
+        except Exception as db_error:
+            logger.error(f"Database insert failed: {str(db_error)}", exc_info=True)
+            raise HTTPException(status_code=500, detail=f"Database error: {str(db_error)}")
     except Exception as e:
         logger.error(f"User creation failed: {str(e)}", exc_info=True)
         raise HTTPException(status_code=400, detail=f"User creation failed: {str(e)}")
