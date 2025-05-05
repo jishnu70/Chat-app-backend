@@ -27,8 +27,8 @@ class Group(Model):
 
 class GroupMember(Model):
     id = fields.IntField(pk=True)
-    group = fields.ForeignKeyField("models.Group", related_name="members")
-    group_user = fields.ForeignKeyField("models.User", related_name="group_memberships")
+    group = fields.ForeignKeyField("models.Group", related_name="members", to_field="id")
+    group_user = fields.ForeignKeyField("models.User", related_name="group_memberships", to_field="id")
 
     class Meta:
         table = "group_members"
@@ -36,9 +36,9 @@ class GroupMember(Model):
 
 class Message(Model):
     id = fields.IntField(pk=True)
-    sender = fields.ForeignKeyField("models.User", related_name="sent_messages")
-    receiver = fields.ForeignKeyField("models.User", related_name="received_messages", null=True)
-    group = fields.ForeignKeyField("models.Group", related_name="messages", null=True)
+    sender = fields.ForeignKeyField("models.User", related_name="sent_messages", to_field="id")
+    receiver = fields.ForeignKeyField("models.User", related_name="received_messages", to_field="id", null=True)
+    group = fields.ForeignKeyField("models.Group", related_name="messages", to_field="id", null=True)
     content = fields.TextField()
     timestamp = fields.DatetimeField(auto_now_add=True)
     media_type = fields.CharEnumField(MediaType, null=True)
