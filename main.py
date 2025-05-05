@@ -5,6 +5,7 @@ from src.database import init_db, get_or_create_user, close_db
 from src.schemas import ChatSummary, UserCreate, UserOut
 from src.models import User, Group, GroupMember, Message, UserCreatePydantic, GroupCreatePydantic, GroupMemberPydantic, MessageCreatePydantic, MediaType
 from firebase_admin import auth, credentials, initialize_app
+from firebase_admin._auth_utils import InvalidIdTokenError
 import os
 import json
 import time
@@ -14,6 +15,7 @@ import uuid
 from pathlib import Path
 from dotenv import load_dotenv
 import logging
+from tortoise.expressions import Q
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s", force=True)
 os.environ["PYTHONUNBUFFERED"] = "1"
@@ -137,16 +139,20 @@ async def get_user_public_key(uid: int, credentials: HTTPAuthorizationCredential
 
 @app.get("/users", dependencies=[Depends(security)])
 async def list_users(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    decoded_token = auth.verify_id_token(credentials.credentials)
-    user_id = await get_or_create_user(
-        decoded_token["uid"], decoded_token.get("email", ""), decoded_token.get("name", None)
-    )
     try:
+        decoded_token = auth.verify_id_token(credentials.credentials)
+        user_id = await get_or_create_user(
+            decoded_token["uid"], decoded_token.get("email", ""), decoded_token.get("name", None)
+        )
         user = await User.get(id=user_id)
         if not user:
             raise HTTPException(status_code=404, detail="User does not exist")
         users = await User.all().values("id", "username")
+        logger.info(f"Listed users for user ID={user_id}: {len(users)} users found")
         return [{"userID": u["id"], "username": u.get("username") or ""} for u in users]
+    except InvalidIdTokenError as e:
+        logger.error(f"Invalid Firebase token: {str(e)}")
+        raise HTTPException(status_code=401, detail="Invalid Firebase token")
     except Exception as e:
         logger.error(f"List users failed: {str(e)}")
         raise HTTPException(status_code=400, detail=f"Failed: {str(e)}")
@@ -316,38 +322,110 @@ async def group_chat(websocket: WebSocket, group_id: int):
             del group_connections[group_id]
         await websocket.close()
 
-@app.get("/chats", dependencies=[Depends(security)], response_model=list[ChatSummary])
+@app.get("/chats", dependencies=[Depends(security)])
 async def list_chats(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    decoded = auth.verify_id_token(credentials.credentials)
     try:
-        me = await User.get(uid=decoded["uid"])
-        priv_msgs = await Message.filter(
-            (Message.sender == me) | (Message.receiver == me)
-        ).order_by("-timestamp").all()
-        seen = set()
-        private_chats = []
-        for msg in priv_msgs:
-            other = msg.receiver if msg.sender == me else msg.sender
-            if other.id not in seen:
-                seen.add(other.id)
-                private_chats.append(ChatSummary(
-                    chat_id=other.id,
-                    title=other.username or str(other.id),
-                    last_message=msg.message_content,
-                    is_group=False
-                ))
-        members = await GroupMember.filter(group_user=me).all()
-        group_chats = []
-        for membership in members:
-            grp = membership.group
-            last = await Message.filter(group=grp).order_by('-timestamp').first()
-            group_chats.append(ChatSummary(
-                chat_id=grp.group_id,
-                title=grp.group_name,
-                last_message=last.message_content if last else '',
-                is_group=True
-            ))
-        return private_chats + group_chats
+        decoded_token = auth.verify_id_token(credentials.credentials)
+        user_id = await get_or_create_user(
+            decoded_token["uid"], decoded_token.get("email", ""), decoded_token.get("name", None)
+        )
+        user = await User.get(id=user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User does not exist")
+        
+        chat_summaries = []
+        
+        # Group chats: Fetch groups where user is a member
+        group_members = await GroupMember.filter(user_id=user_id).prefetch_related("group")
+        group_ids = [gm.group_id for gm in group_members]
+        group_messages = await Message.filter(group_id__in=group_ids).order_by("-timestamp").prefetch_related("group", "sender")
+        
+        # Build group chat summaries
+        seen_groups = set()
+        for message in group_messages:
+            group = message.group
+            if group.id in seen_groups:
+                continue
+            seen_groups.add(group.id)
+            chat_summaries.append({
+                "group_id": group.id,
+                "group_name": group.name,
+                "is_direct": False,
+                "last_message": message.content,
+                "timestamp": message.timestamp.isoformat(),
+                "sender_username": message.sender.username if message.sender else ""
+            })
+        
+        # Direct chats: Fetch messages where user is sender or receiver, group_id is NULL
+        direct_messages = await Message.filter(
+            Q(sender_id=user_id) | Q(receiver_id=user_id),
+            group_id__isnull=True
+        ).order_by("-timestamp").prefetch_related("sender", "receiver")
+        
+        # Build direct chat summaries by unique conversation (sender/receiver pair)
+        seen_conversations = set()
+        for message in direct_messages:
+            # Identify the other user in the conversation
+            other_user_id = message.receiver_id if message.sender_id == user_id else message.sender_id
+            conversation_key = tuple(sorted([user_id, other_user_id]))  # Unique pair
+            if conversation_key in seen_conversations:
+                continue
+            seen_conversations.add(conversation_key)
+            chat_summaries.append({
+                "group_id": None,
+                "group_name": "",  # Frontend will format using sender_id/receiver_id
+                "is_direct": True,
+                "last_message": message.content,
+                "timestamp": message.timestamp.isoformat(),
+                "sender_username": message.sender.username if message.sender else "",
+                "sender_id": message.sender_id,
+                "receiver_id": message.receiver_id
+            })
+        
+        logger.info(f"Listed chats for user ID={user_id}: {len(chat_summaries)} chats found")
+        return chat_summaries
+    except InvalidIdTokenError as e:
+        logger.error(f"Invalid Firebase token: {str(e)}")
+        raise HTTPException(status_code=401, detail="Invalid Firebase token")
     except Exception as e:
         logger.error(f"List chats failed: {str(e)}")
         raise HTTPException(status_code=400, detail=f"Failed: {str(e)}")
+    
+
+@app.put("/users", response_model=UserOut)
+async def update_user(user: UserCreate, credentials: HTTPAuthorizationCredentials = Depends(security)):
+    logger.info(f"Updating user: {user.model_dump()}")
+    try:
+        decoded_token = auth.verify_id_token(credentials.credentials)
+        if user.uid != decoded_token["uid"]:
+            logger.error(f"UID mismatch: input={user.uid}, token={decoded_token['uid']}")
+            raise HTTPException(status_code=403, detail="UID does not match Firebase token")
+        logger.info(f"Firebase token verified for UID: {user.uid}")
+        
+        existing_user = await User.filter(uid=user.uid).first()
+        if not existing_user:
+            logger.warning(f"User not found: UID={user.uid}")
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        try:
+            existing_user.email = user.email
+            existing_user.username = user.username
+            existing_user.public_key = user.public_key
+            await existing_user.save()
+            logger.info(f"User updated: ID={existing_user.id}, UID={user.uid}")
+            return UserOut(
+                id=existing_user.id,
+                uid=existing_user.uid,
+                email=existing_user.email,
+                username=existing_user.username or "",
+                public_key=existing_user.public_key
+            )
+        except Exception as db_error:
+            logger.error(f"Database update failed: {str(db_error)}", exc_info=True)
+            raise HTTPException(status_code=500, detail=f"Database error: {str(db_error)}")
+    except InvalidIdTokenError as e:
+        logger.error(f"Invalid Firebase token: {str(e)}")
+        raise HTTPException(status_code=401, detail="Invalid Firebase token")
+    except Exception as e:
+        logger.error(f"User update failed: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=400, detail=f"User update failed: {str(e)}")
