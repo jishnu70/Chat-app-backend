@@ -336,7 +336,7 @@ async def list_chats(credentials: HTTPAuthorizationCredentials = Depends(securit
         chat_summaries = []
         
         # Group chats: Fetch groups where user is a member
-        group_members = await GroupMember.filter(user_id=user_id).prefetch_related("group")
+        group_members = await GroupMember.filter(group_user_id=user_id).prefetch_related("group")
         group_ids = [gm.group_id for gm in group_members]
         group_messages = await Message.filter(group_id__in=group_ids).order_by("-timestamp").prefetch_related("group", "sender")
         
