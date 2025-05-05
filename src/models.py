@@ -18,8 +18,9 @@ class User(Model):
         table = "users"
 
 class Group(Model):
-    id = fields.IntField(pk=True)
-    name = fields.CharField(max_length=255)
+    group_id = fields.IntField(pk=True)
+    group_name = fields.CharField(max_length=255)
+    group_creator_id = fields.ForeignKeyField("models.User", related_name="created_groups", to_field="id")
     created_at = fields.DatetimeField(auto_now_add=True)
 
     class Meta:
@@ -27,7 +28,7 @@ class Group(Model):
 
 class GroupMember(Model):
     id = fields.IntField(pk=True)
-    group = fields.ForeignKeyField("models.Group", related_name="members", to_field="id")
+    group = fields.ForeignKeyField("models.Group", related_name="members", to_field="group_id")
     group_user = fields.ForeignKeyField("models.User", related_name="group_memberships", to_field="id")
 
     class Meta:
@@ -38,14 +39,14 @@ class Message(Model):
     id = fields.IntField(pk=True)
     sender = fields.ForeignKeyField("models.User", related_name="sent_messages", to_field="id")
     receiver = fields.ForeignKeyField("models.User", related_name="received_messages", to_field="id", null=True)
-    group = fields.ForeignKeyField("models.Group", related_name="messages", to_field="id", null=True)
+    group = fields.ForeignKeyField("models.Group", related_name="messages", to_field="group_id", null=True)
     content = fields.TextField()
     timestamp = fields.DatetimeField(auto_now_add=True)
     media_type = fields.CharEnumField(MediaType, null=True)
     media_url = fields.CharField(max_length=255, null=True)
 
     class Meta:
-        table = "messages"
+        table = "message"
 
 UserCreatePydantic = pydantic_model_creator(User, name="UserCreate", exclude_readonly=True)
 GroupCreatePydantic = pydantic_model_creator(Group, name="GroupCreate", exclude=["group_id", "created_at"])
